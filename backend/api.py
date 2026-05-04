@@ -86,7 +86,9 @@ def load_model():
 
     _id2label = {int(k): v for k, v in lbl_info["id2label"].items()}
 
-    _model = BiLSTM_NER(**_config).to(DEVICE)
+    # Remove max_len from config as it's not a model parameter
+    model_config = {k: v for k, v in _config.items() if k != "max_len"}
+    _model = BiLSTM_NER(**model_config).to(DEVICE)
     _model.load_state_dict(
         torch.load(model_path, map_location=DEVICE)
     )
