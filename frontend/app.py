@@ -17,7 +17,8 @@ st.set_page_config(
 )
 
 # ── API URL ───────────────────────────────────────────────────────────────────
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+# Try environment variable first, then Streamlit secrets, then default
+API_URL = os.getenv("API_URL") or st.secrets.get("api_url", "http://localhost:8000")
 
 # ── Label colours ─────────────────────────────────────────────────────────────
 LABEL_COLORS = {
