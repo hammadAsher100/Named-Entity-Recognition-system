@@ -92,18 +92,20 @@ services:
 
 ## Part 3: Connect Frontend to Backend
 
-Once your backend is deployed, you'll have a URL like:
+Your backend is now deployed at:
 ```
-https://ner-backend-xxxx.onrender.com
+https://named-entity-recognition-system.onrender.com
 ```
 
 ### Update Streamlit App Settings:
+
+The frontend automatically connects to your Render backend. If you need to override it:
 
 1. Go to your **Streamlit Cloud** app → **Settings** (gear icon)
 2. Go to **Secrets**
 3. Add:
 ```toml
-api_url = "https://ner-backend-xxxx.onrender.com"
+api_url = "https://named-entity-recognition-system.onrender.com"
 ```
 
 4. **Reboot** the app
@@ -147,15 +149,17 @@ Your full-stack NER app is now ready! Share this link:
 ┌─────────────────────────────────┐
 │   Streamlit Cloud               │
 │   (Frontend - Public)           │
-│   ner-project-xxx.streamlit.app │
+│   https://ner-project-xxx...    │
+│   .streamlit.app                │
 └────────────────┬────────────────┘
                  │ HTTPS
                  ↓
-┌─────────────────────────────────┐
-│   Render / Railway / etc        │
-│   (Backend - Public)            │
-│   ner-backend-xxxx.onrender.com │
-└─────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│   Render                                │
+│   (Backend - Public)                    │
+│   named-entity-recognition-system       │
+│   .onrender.com                         │
+└─────────────────────────────────────────┘
 ```
 
 Users can now access your NER tool without any setup! 🎉

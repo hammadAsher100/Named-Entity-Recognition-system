@@ -22,7 +22,7 @@ st.set_page_config(
 if "api_url_override" not in st.session_state:
     st.session_state.api_url_override = None
 
-API_URL = st.session_state.api_url_override or os.getenv("API_URL") or st.secrets.get("api_url", "http://localhost:8000")
+API_URL = st.session_state.api_url_override or os.getenv("API_URL") or st.secrets.get("api_url", "https://named-entity-recognition-system.onrender.com")
 
 # Check API health silently
 _api_available = False
