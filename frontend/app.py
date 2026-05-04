@@ -19,7 +19,10 @@ st.set_page_config(
 
 # ── API URL ───────────────────────────────────────────────────────────────────
 # Try environment variable first, then Streamlit secrets, then default
-API_URL = os.getenv("API_URL") or st.secrets.get("api_url", "http://localhost:8000")
+if "api_url_override" not in st.session_state:
+    st.session_state.api_url_override = None
+
+API_URL = st.session_state.api_url_override or os.getenv("API_URL") or st.secrets.get("api_url", "http://localhost:8000")
 
 # Check API health silently
 _api_available = False
@@ -292,39 +295,68 @@ with st.sidebar:
 
     st.markdown("---")
     if st.checkbox("🔧 Debug Mode"):
-        with st.expander("API Details"):
-            st.info(f"**API URL**: {API_URL}")
-            if st.button("Test Connection"):
+        with st.expander("API Configuration"):
+            st.info(f"**Current API URL**: `{API_URL}`")
+            
+            custom_url = st.text_input("Override API URL (leave blank to use default):", value="", key="api_override_input")
+            if custom_url and custom_url.strip():
+                st.session_state.api_url_override = custom_url.rstrip("/")
+                st.rerun()
+            elif st.session_state.api_url_override:
+                if st.button("Clear Override"):
+                    st.session_state.api_url_override = None
+                    st.rerun()
+            
+            st.markdown("**Test Connection:**")
+            if st.button("🔌 Test API", key="test_api_btn"):
                 try:
                     resp = requests.get(f"{API_URL}/health", timeout=3)
-                    st.json(resp.json())
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        st.json(data)
+                        if data.get("model_loaded"):
+                            st.success("✅ API is working and model is loaded!")
+                        else:
+                            st.warning("⚠️ API works but model not loaded. Run training: `python -m backend.train`")
+                    else:
+                        st.error(f"API returned status {resp.status_code}")
+                except requests.exceptions.Timeout:
+                    st.error(f"Timeout: API not responding at {API_URL}")
+                except requests.exceptions.ConnectionError:
+                    st.error(f"Connection refused. Check if API is running at {API_URL}")
                 except Exception as e:
-                    st.error(f"Connection failed: {e}")
+                    st.error(f"Connection failed: {str(e)}")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 # Welcome banner
 st.markdown('<div class="main-title">🔍 NER Explorer</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Identify people, organizations, and locations in any text</div>', unsafe_allow_html=True)
 
+# ── Sample Test Texts ─────────────────────────────────────────────────────────
+SAMPLE_TEXTS = {
+    "Tech Companies": "Apple Inc. was founded by Steve Jobs, Steve Wozniak, and Ronald Wayne in Cupertino, California. Today, Tim Cook serves as CEO and the company is headquartered in Cupertino.",
+    "News Article": "Elon Musk founded Tesla in 2003 and SpaceX in 2002. Both companies are headquartered in California. Musk is also the founder of The Boring Company.",
+    "Geography": "The United Nations headquarters is located in New York City. Paris is the capital of France. Mount Everest is in the Himalayas between Nepal and Tibet.",
+    "Politics": "Barack Obama served as the 44th President of the United States from 2009 to 2017. He was born in Honolulu, Hawaii. Michelle Obama was the First Lady.",
+    "Business": "Microsoft acquired LinkedIn for $26.2 billion in 2016. Bill Gates founded Microsoft in 1975 in Albuquerque, New Mexico. Satya Nadella is the current CEO.",
+    "Entertainment": "Tom Hanks starred in Forrest Gump directed by Robert Zemeckis. The movie was filmed in various locations including Savannah, Georgia.",
+}
+
 if not _api_available:
-    st.warning(
-        "⚠️ **Backend not available**  \n"
-        "Make sure your FastAPI backend is running or properly deployed. "
-        "[See deployment guide](https://github.com/)",
-        icon="⚠️"
-    )
+    with st.warning("⚠️ Backend Connection Issue"):
+        st.markdown("""
+        The NER backend is not currently available. This could mean:
+        
+        1. **Local Testing**: Make sure FastAPI is running with: `uvicorn backend.api:app --reload`
+        2. **Production**: Check if your Render/Railway deployment is live
+        3. **API URL**: Use the 🔧 **Debug Mode** (bottom of sidebar) to verify/override the API URL
+        
+        📖 [See Deployment Guide](https://github.com/your-repo/blob/main/DEPLOY_BACKEND.md)
+        """)
 
 # Input section
 st.markdown("### ✍️ Input Text")
 col_input, col_examples = st.columns([3, 1])
-
-# Example sentences
-EXAMPLES = [
-    "Apple was founded by Steve Jobs, Steve Wozniak, and Ronald Wayne in Cupertino, California.",
-    "The United Nations headquarters is located in New York City.",
-    "Elon Musk's Tesla and SpaceX are headquartered in the United States.",
-    "Barack Obama served as the 44th President of the United States.",
-]
 
 with col_input:
     user_text = st.text_area(
@@ -335,10 +367,16 @@ with col_input:
     )
 
 with col_examples:
-    st.markdown("#### Quick Start")
-    for i, ex in enumerate(EXAMPLES):
-        if st.button(f"Ex {i+1}", key=f"ex_{i}", use_container_width=True):
-            st.session_state["example_text"] = ex
+    st.markdown("#### 📌 Samples")
+    for label, text in list(SAMPLE_TEXTS.items())[:3]:
+        if st.button(label, key=f"ex_{label}", use_container_width=True):
+            st.session_state["example_text"] = text
+
+# Show more samples in expander
+with st.expander("➕ More Samples"):
+    for label, text in list(SAMPLE_TEXTS.items())[3:]:
+        if st.button(f"📌 {label}", key=f"more_{label}", use_container_width=True):
+            st.session_state["example_text"] = text
 
 if "example_text" in st.session_state:
     user_text = st.session_state.pop("example_text")
