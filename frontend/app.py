@@ -7,163 +7,316 @@ import os
 import json
 import requests
 import streamlit as st
+from datetime import datetime
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="NER Explorer",
     page_icon="🔍",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ── API URL ───────────────────────────────────────────────────────────────────
 # Try environment variable first, then Streamlit secrets, then default
 API_URL = os.getenv("API_URL") or st.secrets.get("api_url", "http://localhost:8000")
 
-# ── Label colours ─────────────────────────────────────────────────────────────
+# Check API health silently
+_api_available = False
+try:
+    _health = requests.get(f"{API_URL}/health", timeout=2)
+    _api_available = _health.status_code == 200 and _health.json().get("model_loaded", False)
+except:
+    _api_available = False
+
+# ── Label colours (modern gradient palette) ──────────────────────────────────
 LABEL_COLORS = {
-    "PER":  "#4f8ef7",   # blue
-    "ORG":  "#f7a44f",   # orange
-    "LOC":  "#4fbe7c",   # green
-    "MISC": "#b44ff7",   # purple
-    "O":    "#888888",
+    "PER":  "#3b82f6",   # blue
+    "ORG":  "#f59e0b",   # amber
+    "LOC":  "#10b981",   # emerald
+    "MISC": "#8b5cf6",   # violet
+    "O":    "#6b7280",   # gray
 }
 
 def label_color(label: str) -> str:
     return LABEL_COLORS.get(label, "#cccccc")
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
+# ── Custom CSS (modern design) ────────────────────────────────────────────────
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-    html, body, [class*="css"] {
-        font-family: 'IBM Plex Sans', sans-serif;
+    * {
+        font-family: 'Inter', sans-serif;
     }
 
+    /* Main title with gradient */
     .main-title {
-        font-size: 2.8rem;
+        font-size: 3.2rem;
         font-weight: 700;
-        letter-spacing: -1px;
-        background: linear-gradient(135deg, #4f8ef7, #4fbe7c);
+        letter-spacing: -2px;
+        background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        margin-bottom: 0.1rem;
-    }
-    .subtitle {
-        color: #888;
-        font-size: 1.05rem;
-        margin-bottom: 2rem;
+        background-clip: text;
+        margin-bottom: 0.5rem;
+        animation: fadeIn 0.6s ease-in;
     }
 
-    /* Token chips */
+    .subtitle {
+        color: #9ca3af;
+        font-size: 1.1rem;
+        font-weight: 400;
+        margin-bottom: 2rem;
+        letter-spacing: 0.3px;
+    }
+
+    /* Input area styling */
+    .stTextArea > div > div > textarea {
+        border: 2px solid #e5e7eb !important;
+        border-radius: 12px !important;
+        padding: 16px !important;
+        font-size: 15px !important;
+        transition: all 0.3s ease;
+    }
+
+    .stTextArea > div > div > textarea:focus {
+        border-color: #3b82f6 !important;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+    }
+
+    /* Token container */
     .token-container {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
-        padding: 1.2rem;
-        background: #0e1117;
+        gap: 8px;
+        padding: 20px;
+        background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
         border-radius: 12px;
-        border: 1px solid #2a2a2a;
-        font-family: 'IBM Plex Mono', monospace;
-    }
-    .token {
-        padding: 4px 10px;
-        border-radius: 6px;
-        font-size: 0.88rem;
-        font-weight: 400;
-        border: 1px solid transparent;
-        transition: transform 0.1s;
-    }
-    .token:hover { transform: translateY(-2px); }
-    .token-O {
-        background: #1e1e1e;
-        color: #bbb;
-        border-color: #333;
+        border: 1px solid #e5e7eb;
+        font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+        min-height: 80px;
     }
 
-    /* Entity cards */
+    .token {
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        border: 1px solid transparent;
+        transition: all 0.2s ease;
+        cursor: pointer;
+    }
+
+    .token:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .token-O {
+        background: #f3f4f6;
+        color: #6b7280;
+        border-color: #d1d5db;
+    }
+
+    /* Entity card */
     .entity-card {
         display: flex;
         align-items: center;
         gap: 12px;
-        padding: 10px 16px;
+        padding: 12px 16px;
         border-radius: 10px;
-        margin-bottom: 8px;
+        margin-bottom: 10px;
         border-left: 4px solid;
+        background: #f9fafb;
+        transition: all 0.2s ease;
     }
+
+    .entity-card:hover {
+        transform: translateX(4px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
     .entity-label {
-        font-size: 0.72rem;
+        font-size: 0.7rem;
         font-weight: 700;
         letter-spacing: 1.5px;
         text-transform: uppercase;
-        padding: 2px 8px;
-        border-radius: 4px;
+        padding: 4px 10px;
+        border-radius: 6px;
         color: #fff;
+        white-space: nowrap;
     }
+
     .entity-text {
-        font-family: 'IBM Plex Mono', monospace;
+        font-family: 'SF Mono', Monaco, monospace;
         font-size: 1rem;
         font-weight: 600;
+        color: #1f2937;
     }
 
     /* Stat box */
     .stat-box {
-        background: #161b22;
-        border: 1px solid #30363d;
-        border-radius: 10px;
-        padding: 1rem 1.2rem;
+        background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+        border: 1.5px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 20px;
         text-align: center;
+        transition: all 0.3s ease;
     }
-    .stat-number { font-size: 2rem; font-weight: 700; }
-    .stat-label  { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+
+    .stat-box:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+        border-color: #d1d5db;
+    }
+
+    .stat-number {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 8px;
+    }
+
+    .stat-label {
+        font-size: 0.8rem;
+        color: #9ca3af;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-weight: 600;
+    }
+
+    /* Button styling */
+    .stButton > button {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 12px 32px !important;
+        font-weight: 600 !important;
+        font-size: 1rem !important;
+        transition: all 0.3s ease !important;
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 16px rgba(59, 130, 246, 0.3) !important;
+    }
+
+    /* Example buttons */
+    .example-button {
+        background: #f3f4f6 !important;
+        border: 1px solid #e5e7eb !important;
+        color: #1f2937 !important;
+        transition: all 0.2s ease !important;
+    }
+
+    .example-button:hover {
+        background: #e5e7eb !important;
+        border-color: #3b82f6 !important;
+    }
+
+    /* Sidebar styling */
+    .sidebar-section {
+        background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 16px;
+        border: 1px solid #e5e7eb;
+    }
+
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        background: #f3f4f6;
+        border-radius: 8px;
+    }
+
+    /* Animation */
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade-in {
+        animation: fadeIn 0.4s ease-in;
+    }
+
+    hr {
+        background: linear-gradient(to right, transparent, #e5e7eb, transparent);
+        border: none;
+        height: 1px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### ⚙️ Configuration")
-    api_url_input = st.text_input("API URL", value=API_URL)
-    if api_url_input:
-        API_URL = api_url_input.rstrip("/")
+    st.markdown("### 🔖 Entity Types")
+    cols = st.columns(2)
+    for idx, (label, color) in enumerate([("PER", LABEL_COLORS["PER"]), 
+                                          ("ORG", LABEL_COLORS["ORG"]),
+                                          ("LOC", LABEL_COLORS["LOC"]),
+                                          ("MISC", LABEL_COLORS["MISC"])]):
+        with cols[idx % 2]:
+            st.markdown(
+                f'<div style="background:{color};color:#fff;padding:10px;'
+                f'border-radius:8px;text-align:center;font-weight:600;margin:4px 0">'
+                f'{label} — {"Person" if label=="PER" else "Organization" if label=="ORG" else "Location" if label=="LOC" else "Miscellaneous"}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
     st.markdown("---")
-    st.markdown("### 🏷️ Entity Types")
-    for label, color in LABEL_COLORS.items():
-        if label == "O":
-            continue
-        st.markdown(
-            f'<span style="background:{color};color:#fff;padding:2px 10px;'
-            f'border-radius:4px;font-size:0.85rem;font-weight:600">{label}</span>'
-            f"&nbsp; {'Person' if label=='PER' else 'Organisation' if label=='ORG' else 'Location' if label=='LOC' else 'Miscellaneous'}",
-            unsafe_allow_html=True,
-        )
-        st.write("")
-
-    st.markdown("---")
-    # Health check
-    try:
-        r = requests.get(f"{API_URL}/health", timeout=3)
-        if r.status_code == 200:
-            data = r.json()
-            if data.get("model_loaded"):
-                st.success("✅ API connected · Model loaded")
-            else:
-                st.warning("⚠️ API connected · Model not loaded\nRun training first.")
+    st.markdown("### 📊 Model Info")
+    col1, col2 = st.columns(2)
+    with col1:
+        if _api_available:
+            st.markdown('<div style="color:#10b981;font-weight:600">✓ API Ready</div>', unsafe_allow_html=True)
         else:
-            st.error("❌ API returned an error")
-    except Exception:
-        st.error("❌ Cannot reach API\nMake sure FastAPI is running.")
+            st.markdown('<div style="color:#ef4444;font-weight:600">✗ API Offline</div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown(f'<div style="color:#9ca3af;font-size:0.9rem">v1.0.0</div>', unsafe_allow_html=True)
 
     st.markdown("---")
+    st.markdown("### ℹ️ About")
     st.markdown(
-        "<small style='color:#555'>BiLSTM · CoNLL-2003 · PyTorch</small>",
-        unsafe_allow_html=True,
+        """
+        **BiLSTM NER** — State-of-the-art Named Entity Recognition
+
+        - **Dataset**: CoNLL-2003
+        - **Model**: Bidirectional LSTM
+        - **Framework**: PyTorch + FastAPI
+        - **UI**: Streamlit
+        """,
+        unsafe_allow_html=False,
     )
 
+    st.markdown("---")
+    if st.checkbox("🔧 Debug Mode"):
+        with st.expander("API Details"):
+            st.info(f"**API URL**: {API_URL}")
+            if st.button("Test Connection"):
+                try:
+                    resp = requests.get(f"{API_URL}/health", timeout=3)
+                    st.json(resp.json())
+                except Exception as e:
+                    st.error(f"Connection failed: {e}")
+
 # ── Main ──────────────────────────────────────────────────────────────────────
+# Welcome banner
 st.markdown('<div class="main-title">🔍 NER Explorer</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Named Entity Recognition powered by BiLSTM deep learning</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Identify people, organizations, and locations in any text</div>', unsafe_allow_html=True)
+
+if not _api_available:
+    st.warning(
+        "⚠️ **Backend not available**  \n"
+        "Make sure your FastAPI backend is running or properly deployed. "
+        "[See deployment guide](https://github.com/)",
+        icon="⚠️"
+    )
+
+# Input section
+st.markdown("### ✍️ Input Text")
+col_input, col_examples = st.columns([3, 1])
 
 # Example sentences
 EXAMPLES = [
@@ -171,125 +324,134 @@ EXAMPLES = [
     "The United Nations headquarters is located in New York City.",
     "Elon Musk's Tesla and SpaceX are headquartered in the United States.",
     "Barack Obama served as the 44th President of the United States.",
-    "Google acquired YouTube in 2006 for $1.65 billion.",
-    "The FIFA World Cup 2022 was held in Qatar.",
 ]
 
-col1, col2 = st.columns([3, 1])
-with col1:
+with col_input:
     user_text = st.text_area(
         "Enter text to analyse",
-        height=120,
-        placeholder="Type or paste any text here…",
+        height=140,
+        placeholder="Paste your text here and click Analyse...",
+        label_visibility="collapsed"
     )
-with col2:
-    st.markdown("**Quick examples**")
-    for i, ex in enumerate(EXAMPLES[:4]):
-        if st.button(f"Example {i+1}", key=f"ex_{i}", use_container_width=True):
+
+with col_examples:
+    st.markdown("#### Quick Start")
+    for i, ex in enumerate(EXAMPLES):
+        if st.button(f"Ex {i+1}", key=f"ex_{i}", use_container_width=True):
             st.session_state["example_text"] = ex
 
 if "example_text" in st.session_state:
     user_text = st.session_state.pop("example_text")
     st.rerun()
 
-analyse_btn = st.button("🔍 Analyse", type="primary", use_container_width=False)
+# Analyze button
+st.markdown("###")
+col_btn, col_space = st.columns([1, 4])
+with col_btn:
+    analyse_btn = st.button("🔍 Analyse", type="primary", use_container_width=True, key="analyze_btn")
 
 # ── Run prediction ────────────────────────────────────────────────────────────
 if analyse_btn and user_text.strip():
-    with st.spinner("Running NER…"):
-        try:
-            resp = requests.post(
-                f"{API_URL}/predict",
-                json={"text": user_text},
-                timeout=15,
-            )
-            if resp.status_code == 200:
-                result = resp.json()
-            else:
-                st.error(f"API error {resp.status_code}: {resp.text}")
+    if not _api_available:
+        st.error("⚠️ Cannot reach the API backend. Please ensure it's running.")
+    else:
+        with st.spinner("🔄 Analyzing text..."):
+            try:
+                resp = requests.post(
+                    f"{API_URL}/predict",
+                    json={"text": user_text},
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    result = resp.json()
+                else:
+                    st.error(f"API error {resp.status_code}: {resp.text}")
+                    result = None
+            except requests.exceptions.ConnectionError:
+                st.error("❌ Cannot connect to the backend. Make sure it's deployed and running.")
                 result = None
-        except requests.exceptions.ConnectionError:
-            st.error("Cannot connect to the FastAPI backend. Is it running?")
-            result = None
-        except Exception as e:
-            st.error(f"Unexpected error: {e}")
-            result = None
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
+                result = None
 
-    if result:
-        entities  = result["entities"]
-        tokens    = result["tokens"]
-        st.markdown("---")
+        if result:
+            st.markdown("---")
+            entities  = result["entities"]
+            tokens    = result["tokens"]
 
-        # ── Stats row ──────────────────────────────────────────────────────
-        counts = {}
-        for ent in entities:
-            counts[ent["label"]] = counts.get(ent["label"], 0) + 1
-
-        stat_cols = st.columns(5)
-        labels_display = [("Total", len(entities), "#4f8ef7"),
-                          ("PER",  counts.get("PER",  0), LABEL_COLORS["PER"]),
-                          ("ORG",  counts.get("ORG",  0), LABEL_COLORS["ORG"]),
-                          ("LOC",  counts.get("LOC",  0), LABEL_COLORS["LOC"]),
-                          ("MISC", counts.get("MISC", 0), LABEL_COLORS["MISC"])]
-
-        for col, (name, num, color) in zip(stat_cols, labels_display):
-            with col:
-                st.markdown(
-                    f'<div class="stat-box">'
-                    f'<div class="stat-number" style="color:{color}">{num}</div>'
-                    f'<div class="stat-label">{name}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-        st.markdown("#### Token View")
-
-        # Build token HTML
-        token_html = '<div class="token-container">'
-        for tt in tokens:
-            tag = tt["tag"]
-            if tag == "O":
-                token_html += (
-                    f'<span class="token token-O" title="O">{tt["token"]}</span>'
-                )
-            else:
-                lbl   = tag.split("-")[-1] if "-" in tag else tag
-                color = label_color(lbl)
-                token_html += (
-                    f'<span class="token" title="{tag}" '
-                    f'style="background:{color}22;color:{color};border-color:{color}55">'
-                    f'{tt["token"]}'
-                    f'<sup style="font-size:0.6em;margin-left:3px;opacity:0.8">{lbl}</sup>'
-                    f'</span>'
-                )
-        token_html += "</div>"
-        st.markdown(token_html, unsafe_allow_html=True)
-
-        # ── Entities list ──────────────────────────────────────────────────
-        if entities:
-            st.markdown("#### Extracted Entities")
+            # ── Stats row ──────────────────────────────────────────────────────
+            counts = {}
             for ent in entities:
-                color = label_color(ent["label"])
-                st.markdown(
-                    f'<div class="entity-card" style="background:{color}11;border-color:{color}">'
-                    f'<span class="entity-label" style="background:{color}">{ent["label"]}</span>'
-                    f'<span class="entity-text" style="color:{color}">{ent["text"]}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.info("No named entities detected in this text.")
+                counts[ent["label"]] = counts.get(ent["label"], 0) + 1
 
-        # ── Raw JSON toggle ────────────────────────────────────────────────
-        with st.expander("📄 Raw JSON response"):
-            st.json(result)
+            stat_cols = st.columns(5)
+            labels_display = [("Total", len(entities), "#3b82f6"),
+                              ("PER",  counts.get("PER",  0), LABEL_COLORS["PER"]),
+                              ("ORG",  counts.get("ORG",  0), LABEL_COLORS["ORG"]),
+                              ("LOC",  counts.get("LOC",  0), LABEL_COLORS["LOC"]),
+                              ("MISC", counts.get("MISC", 0), LABEL_COLORS["MISC"])]
+
+            for col, (name, num, color) in zip(stat_cols, labels_display):
+                with col:
+                    st.markdown(
+                        f'<div class="stat-box">'
+                        f'<div class="stat-number" style="color:{color}">{num}</div>'
+                        f'<div class="stat-label">{name}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # ── Token View ─────────────────────────────────────────────────────
+            st.markdown("### 🏷️ Token Analysis")
+            
+            token_html = '<div class="token-container">'
+            for tt in tokens:
+                tag = tt["tag"]
+                if tag == "O":
+                    token_html += (
+                        f'<span class="token token-O" title="O">{tt["token"]}</span>'
+                    )
+                else:
+                    lbl   = tag.split("-")[-1] if "-" in tag else tag
+                    color = label_color(lbl)
+                    token_html += (
+                        f'<span class="token" title="{tag}" '
+                        f'style="background:{color}22;color:{color};border-color:{color}55;border:1.5px solid {color}55">'
+                        f'{tt["token"]}'
+                        f'<sup style="font-size:0.65em;margin-left:3px;opacity:0.9;font-weight:600">{lbl}</sup>'
+                        f'</span>'
+                    )
+            token_html += "</div>"
+            st.markdown(token_html, unsafe_allow_html=True)
+
+            # ── Entities list ──────────────────────────────────────────────────
+            if entities:
+                st.markdown("### 📍 Extracted Entities")
+                for ent in entities:
+                    color = label_color(ent["label"])
+                    st.markdown(
+                        f'<div class="entity-card" style="background:{color}08;border-color:{color}">'
+                        f'<span class="entity-label" style="background:{color}">{ent["label"]}</span>'
+                        f'<span class="entity-text" style="color:{color}">{ent["text"]}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.info("No named entities detected in this text.", icon="ℹ️")
+
+            # ── Raw JSON toggle ────────────────────────────────────────────────
+            with st.expander("📄 View Raw Response"):
+                st.json(result)
 
 elif analyse_btn:
-    st.warning("Please enter some text first.")
+    st.warning("Please enter some text first.", icon="⚠️")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
-    "<small style='color:#555'>Built with PyTorch · FastAPI · Streamlit | CoNLL-2003 dataset</small>",
+    "<div style='text-align: center; color: #9ca3af; font-size: 0.9rem'>"
+    "Built with <strong>PyTorch</strong> · <strong>FastAPI</strong> · <strong>Streamlit</strong> | "
+    "CoNLL-2003 Dataset"
+    "</div>",
     unsafe_allow_html=True,
 )
